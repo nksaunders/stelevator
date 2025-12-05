@@ -89,7 +89,6 @@ def emulate(
         x = x[None, :]
 
     # Extract normalization parameters from the first & last layers
-    # (same as original code)
     input_offset = model.layers[0].mean.numpy()
     input_scale = np.sqrt(model.layers[0].variance.numpy())
 
