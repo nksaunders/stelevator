@@ -185,7 +185,7 @@ if mode == "Population":
     st.subheader(f"{grid} population")
 
     nstars = st.number_input(
-        "Number of stars", min_value=100, max_value=200_000, value=10_000, step=1000
+        "Number of stars", min_value=1, max_value=200_000, value=10_000, step=1
     )
     fk = st.number_input("fk", value=7.5)
     rocrit = st.number_input("rocrit", value=1.6)
@@ -226,23 +226,23 @@ if mode == "Population":
     if grid == "MESA":
         cols = st.columns(4)
         with cols[0]:
-            Y_mu = st.number_input("Y_ini mean", value=0.26)
+            Y_mu = st.number_input(r"Y$_{\textsf{init}}$ mean", value=0.26)
         with cols[1]:
-            Y_sigma = st.number_input("Y_ini sigma", value=0.2)
+            Y_sigma = st.number_input(r"Y$_{\textsf{init}}$ sigma", value=0.2)
         with cols[2]:
-            Y_min = st.number_input("Y_ini min", value=0.22)
+            Y_min = st.number_input(r"Y$_{\textsf{init}}$ min", value=0.22)
         with cols[3]:
-            Y_max = st.number_input("Y_ini max", value=0.28)
+            Y_max = st.number_input(r"Y$_{\textsf{init}}$ max", value=0.28)
 
     cols = st.columns(4)
     with cols[0]:
-        alpha_mu = st.number_input("α_MLT mean", value=1.6)
+        alpha_mu = st.number_input(r"α$_{\textsf{MLT}}$ mean", value=1.6)
     with cols[1]:
-        alpha_sigma = st.number_input("α_MLT sigma", value=0.2)
+        alpha_sigma = st.number_input(r"α$_{\textsf{MLT}}$ sigma", value=0.2)
     with cols[2]:
-        alpha_min = st.number_input("α_MLT min", value=1.4)
+        alpha_min = st.number_input(r"α$_{\textsf{MLT}}$ min", value=1.4)
     with cols[3]:
-        alpha_max = st.number_input("α_MLT max", value=2.0)
+        alpha_max = st.number_input(r"α$_{\textsf{MLT}}$ max", value=2.0)
 
 else:
     st.subheader(f"{grid} track")

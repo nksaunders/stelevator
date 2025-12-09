@@ -6,7 +6,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.stats import truncnorm
+
+# Add these:
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # hide most TF C++ warnings
+
+import tensorflow as tf
 from tensorflow.keras.models import load_model
+
+tf.get_logger().setLevel("ERROR")  # hide Python-level TF warnings
+
 
 font = {"size": 16}
 matplotlib.rc("font", **font)
@@ -45,12 +53,16 @@ def _load_emulator_model(grid: str, base_dir: str | os.PathLike | None = None):
 
 def _elu(x: np.ndarray) -> np.ndarray:
     """
-    ELU activation with alpha=1, matching T.nnet.elu.
+    ELU activation with alpha=1, numerically safe.
 
     f(x) = x        if x >= 0
            exp(x)-1 if x < 0
     """
-    return np.where(x >= 0.0, x, np.exp(x) - 1.0)
+    x = np.asarray(x, dtype=np.float32)
+    out = x.copy()
+    neg_mask = out < 0
+    out[neg_mask] = np.exp(out[neg_mask]) - 1.0
+    return out
 
 
 def emulate(
