@@ -1,6 +1,8 @@
 streamlit>=1.32
-tensorflow==2.15.0
-numpy>=1.23,<2.0
-pandas>=1.5
-scipy>=1.10
-matplotlib>=3.7
+
+tensorflow==2.20.0
+
+numpy<2.0
+pandas
+scipy
+matplotlib

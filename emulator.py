@@ -6,15 +6,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.stats import truncnorm
+from functools import lru_cache
 
-# Add these:
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # hide most TF C++ warnings
-
 import tensorflow as tf
-from tensorflow.keras.models import load_model
 
 tf.get_logger().setLevel("ERROR")  # hide Python-level TF warnings
-
 
 font = {"size": 16}
 matplotlib.rc("font", **font)
@@ -22,22 +19,16 @@ matplotlib.rc("font", **font)
 # Base directory for repo-relative model paths
 ROOT = Path(__file__).resolve().parent
 
-
+@lru_cache(maxsize=2)
 def _load_emulator_model(grid: str, base_dir: str | os.PathLike | None = None):
     """
-    Load the trained Keras model for the given grid.
+    Load the SavedModel for the given grid using tf.saved_model.load.
 
-    Parameters
-    ----------
-    grid : {"MESA", "YREC"}
-    base_dir : path-like, optional
-        Base directory where the data/models/ tree lives. If None,
-        defaults to this file's directory.
+    Returns a callable inference function (usually the 'serving_default' signature).
     """
     base_dir = Path(base_dir) if base_dir is not None else ROOT
 
     if grid == "MESA":
-        # Adjust this path to wherever rotated_mesa_run3 actually lives
         path = base_dir / "data" / "models" / "rotated_mesa_run3"
     elif grid == "YREC":
         path = base_dir / "data" / "models" / "model_4"
@@ -47,22 +38,21 @@ def _load_emulator_model(grid: str, base_dir: str | os.PathLike | None = None):
     if not path.exists():
         raise FileNotFoundError(f"Model path does not exist: {path}")
 
-    model = load_model(path)
-    return model
+    model = tf.saved_model.load(str(path))
 
+    # Prefer the 'serving_default' signature if available
+    signatures = getattr(model, "signatures", None)
+    if signatures:
+        fn = signatures.get("serving_default")
+        if fn is None:
+            # Fallback: just take the first available signature
+            fn = next(iter(signatures.values()))
+    else:
+        # Fallback: assume the loaded object itself is callable (e.g., Keras model)
+        def fn(x):
+            return {"output": model(x)}
 
-def _elu(x: np.ndarray) -> np.ndarray:
-    """
-    ELU activation with alpha=1, numerically safe.
-
-    f(x) = x        if x >= 0
-           exp(x)-1 if x < 0
-    """
-    x = np.asarray(x, dtype=np.float32)
-    out = x.copy()
-    neg_mask = out < 0
-    out[neg_mask] = np.exp(out[neg_mask]) - 1.0
-    return out
+    return fn
 
 
 def emulate(
@@ -71,12 +61,7 @@ def emulate(
     base_dir: str | os.PathLike | None = None,
 ) -> np.ndarray:
     """
-    Forward pass through the emulator network using NumPy only.
-
-    This is a direct translation of the original Theano-based code:
-      - same normalization using model.layers[0].mean/variance
-      - same hidden-layer ELU activations
-      - same output scaling using model.layers[-1].offset/scale
+    Forward pass through the emulator SavedModel using TensorFlow.
 
     Parameters
     ----------
@@ -85,51 +70,30 @@ def emulate(
         [log10(age), M, feh, Y, alpha, fk, rocrit]
     grid : {"MESA", "YREC"}
     base_dir : path-like, optional
-        Base directory for model paths.
 
     Returns
     -------
     outputs : np.ndarray, shape (n_samples, n_outputs)
-        Raw emulator outputs (before the 10** transforms etc.
-        applied in the helper functions).
+        Raw emulator outputs (same as the original TF model).
     """
-    model = _load_emulator_model(grid, base_dir=base_dir)
+    infer = _load_emulator_model(grid, base_dir=base_dir)
 
-    # Ensure NumPy array with batch dimension
     x = np.asarray(inputs, dtype=np.float32)
     if x.ndim == 1:
         x = x[None, :]
 
-    # Extract normalization parameters from the first & last layers
-    input_offset = model.layers[0].mean.numpy()
-    input_scale = np.sqrt(model.layers[0].variance.numpy())
+    x_tf = tf.convert_to_tensor(x)
 
-    output_offset = np.array(model.layers[-1].offset)
-    output_scale = np.array(model.layers[-1].scale)
+    # Call the SavedModel signature; it may return a dict of tensors
+    out = infer(x_tf)
 
-    # Extract dense-layer weights and biases:
-    #   weights[3:-1:2]  -> hidden-layer weights
-    #   weights[4::2]    -> hidden-layer biases
-    weights = model.get_weights()
-    w = weights[3:-1:2]
-    b = weights[4::2]
+    if isinstance(out, dict):
+        # Take the first tensor in the outputs dict
+        y = next(iter(out.values()))
+    else:
+        y = out
 
-    # Input normalization
-    x = (x - input_offset) / input_scale
-
-    # Hidden layers with ELU activation
-    for wi, bi in zip(w[:-1], b[:-1]):
-        # x: (n_samples, n_in), wi: (n_in, n_out), bi: (n_out,)
-        z = x @ wi + bi
-        x = _elu(z)
-
-    # Final linear layer
-    outputs = x @ w[-1] + b[-1]
-
-    # Output scaling
-    outputs = output_offset + outputs * output_scale
-
-    return outputs
+    return y.numpy()
 
 
 def bound_normal(mean=0, sd=1, low=0, upp=10, size=1):
