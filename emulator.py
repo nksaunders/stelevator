@@ -1,58 +1,79 @@
 import os
 from pathlib import Path
+from functools import lru_cache
 
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.stats import truncnorm
-from functools import lru_cache
 
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # hide most TF C++ warnings
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # quiet TF C++ logs
+
 import tensorflow as tf
+from tensorflow.keras.models import load_model
 
-tf.get_logger().setLevel("ERROR")  # hide Python-level TF warnings
+tf.get_logger().setLevel("ERROR")  # quiet TF Python logs
+
+ROOT = Path(__file__).resolve().parent
 
 font = {"size": 16}
 matplotlib.rc("font", **font)
 
-# Base directory for repo-relative model paths
-ROOT = Path(__file__).resolve().parent
-
 @lru_cache(maxsize=2)
-def _load_emulator_model(grid: str, base_dir: str | os.PathLike | None = None):
+def _load_params(grid: str, base_dir: str | os.PathLike | None = None):
     """
-    Load the SavedModel for the given grid using tf.saved_model.load.
+    Load pre-exported emulator parameters for the given grid.
 
-    Returns a callable inference function (usually the 'serving_default' signature).
+    Parameters
+    ----------
+    grid : {"MESA", "YREC"}
+    base_dir : optional base directory (defaults to this file's directory)
     """
     base_dir = Path(base_dir) if base_dir is not None else ROOT
 
     if grid == "MESA":
-        path = base_dir / "data" / "models" / "rotated_mesa_run3"
+        npz_path = base_dir / "data" / "models" / "rotated_mesa_run3_params.npz"
     elif grid == "YREC":
-        path = base_dir / "data" / "models" / "model_4"
+        npz_path = base_dir / "data" / "models" / "model_4_params.npz"
     else:
         raise ValueError("grid must be 'MESA' or 'YREC'")
 
-    if not path.exists():
-        raise FileNotFoundError(f"Model path does not exist: {path}")
+    if not npz_path.exists():
+        raise FileNotFoundError(
+            f"Parameter file not found: {npz_path}\n"
+            "Did you run export_emulator_params.py?"
+        )
 
-    model = tf.saved_model.load(str(path))
+    data = np.load(npz_path, allow_pickle=True)
 
-    # Prefer the 'serving_default' signature if available
-    signatures = getattr(model, "signatures", None)
-    if signatures:
-        fn = signatures.get("serving_default")
-        if fn is None:
-            # Fallback: just take the first available signature
-            fn = next(iter(signatures.values()))
-    else:
-        # Fallback: assume the loaded object itself is callable (e.g., Keras model)
-        def fn(x):
-            return {"output": model(x)}
+    # w and b are stored as object arrays; convert back to Python lists of ndarrays
+    w = [np.array(arr) for arr in data["w"]]
+    b = [np.array(arr) for arr in data["b"]]
 
-    return fn
+    params = {
+        "input_offset": np.array(data["input_offset"]),
+        "input_scale": np.array(data["input_scale"]),
+        "output_offset": np.array(data["output_offset"]),
+        "output_scale": np.array(data["output_scale"]),
+        "w": w,
+        "b": b,
+    }
+    return params
+
+
+def _elu(x: np.ndarray) -> np.ndarray:
+    """
+    Numerically safe ELU with alpha=1.
+
+    f(x) = x        if x >= 0
+           exp(x)-1 if x < 0
+    """
+    x = np.asarray(x, dtype=np.float32)
+    out = x.copy()
+    neg_mask = out < 0
+    out[neg_mask] = np.exp(out[neg_mask]) - 1.0
+    return out
 
 
 def emulate(
@@ -61,39 +82,42 @@ def emulate(
     base_dir: str | os.PathLike | None = None,
 ) -> np.ndarray:
     """
-    Forward pass through the emulator SavedModel using TensorFlow.
+    Forward pass through the emulator network using pure NumPy.
 
     Parameters
     ----------
     inputs : array-like, shape (n_samples, n_features)
-        Input feature matrix. For example, for MESA:
-        [log10(age), M, feh, Y, alpha, fk, rocrit]
-    grid : {"MESA", "YREC"}
-    base_dir : path-like, optional
+        e.g. for MESA: [log10(age), M, feh, Y, alpha, fk, rocrit]
+    grid   : {"MESA", "YREC"}
+    base_dir : optional base directory for model paths.
 
     Returns
     -------
     outputs : np.ndarray, shape (n_samples, n_outputs)
-        Raw emulator outputs (same as the original TF model).
     """
-    infer = _load_emulator_model(grid, base_dir=base_dir)
+    params = _load_params(grid, base_dir=base_dir)
 
     x = np.asarray(inputs, dtype=np.float32)
     if x.ndim == 1:
         x = x[None, :]
 
-    x_tf = tf.convert_to_tensor(x)
+    # Input normalization
+    x = (x - params["input_offset"]) / params["input_scale"]
 
-    # Call the SavedModel signature; it may return a dict of tensors
-    out = infer(x_tf)
+    w_list = params["w"]
+    b_list = params["b"]
 
-    if isinstance(out, dict):
-        # Take the first tensor in the outputs dict
-        y = next(iter(out.values()))
-    else:
-        y = out
+    # Hidden layers with ELU
+    for wi, bi in zip(w_list[:-1], b_list[:-1]):
+        z = x @ wi + bi
+        x = _elu(z)
 
-    return y.numpy()
+    # Final linear layer
+    outputs = x @ w_list[-1] + b_list[-1]
+
+    # Output scaling
+    outputs = params["output_offset"] + outputs * params["output_scale"]
+    return outputs
 
 
 def bound_normal(mean=0, sd=1, low=0, upp=10, size=1):
