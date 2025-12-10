@@ -33,6 +33,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+st.markdown("***↑ Going up?***")
+
 st.markdown(
     "Grid-based stellar evolution emulator for MESA / YREC models. "
     "Use the sidebar to choose a model grid and mode."
@@ -54,7 +56,7 @@ st.markdown(
     "**Stelevator** is an artificial neural network trained to emulate a limited set of outputs "
     "from detailed stellar evolution models. It is designed to rapidly generate large populations "
     "of stars, or individual evolutionary tracks, for use in stellar and exoplanetary studies. "
-    "Stelevator currently supports two model grids: MESA and YREC."
+    "**Stelevator** currently supports two model grids: MESA and YREC."
 )
 
 st.markdown(
