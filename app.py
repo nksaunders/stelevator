@@ -76,7 +76,14 @@ st.markdown(
     "The neural networks were trained on models with a limited range of input parameters, "
     "so care should be taken when using **stelevator** to ensure that inputs remain within "
     "the training bounds. See the [paper](https://ui.adsabs.harvard.edu/abs/2024ApJ...962..138S/abstract) "
-    "for full details on the model training and performance. Parameter boundaries are listed in Table 1."
+    "for full details on the model training and performance. Parameter boundaries are listed in Table 1. "
+)
+
+st.markdown(
+    "Stellar tracks used for training were only computed up to the subgiant phase, and emulated outputs "
+    "should not be trusted beyond this point. "
+    "While the current parameter ranges are relatively limited in scope, we hope to expand the model grids "
+    "in future releases."
 )
 
 st.markdown("⚠ **We strongly caution that extrapolation beyond the training bounds may lead to unphysical results.**")
