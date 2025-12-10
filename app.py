@@ -22,13 +22,12 @@ st.markdown(
         font-weight: 400;
         margin: 0 0 1rem 0;
     }
-    .stelevator-title b, .stelevator-title u {
+    .stelevator-title b, {
         font-weight: 700;
-        text-decoration: underline;
     }
     </style>
     <div class="stelevator-title">
-      <b>stel</b>ev<b>ator</b>: <b>stel</b>lar <b>ev</b>olution emul<b>ator</b>
+      <u><b>stelevator</b></u>: a <u>stel</u>lar <u>ev</u>olution emul<u>ator</u>
     </div>
     """,
     unsafe_allow_html=True,
@@ -39,7 +38,49 @@ st.markdown(
     "Use the sidebar to choose a model grid and mode."
 )
 
-# st.subheader("Important caveats")
+st.markdown(
+    "Developed by Nicholas Saunders ([GitHub](https://github.com/nksaunders), [Personal Website](https://nksaunders.space)).  \n"
+    "If you use this software in a publication, please cite "
+    "[Saunders et al. (2024)](https://ui.adsabs.harvard.edu/abs/2024ApJ...962..138S/abstract)."
+)
+
+st.markdown("---")
+
+st.subheader("Read me before using")
+
+st.markdown("#### About stelevator")
+
+st.markdown(
+    "**Stelevator** is an artificial neural network trained to emulate a limited set of outputs "
+    "from detailed stellar evolution models. It is designed to rapidly generate large populations "
+    "of stars, or individual evolutionary tracks, for use in stellar and exoplanetary studies. "
+    "Stelevator currently supports two model grids: MESA and YREC."
+)
+
+st.markdown(
+    "This tool was developed to examine the behavior of stellar rotation over time, "
+    "and includes a simple braking law to model angular momentum loss via magnetized stellar winds. "
+    "Because of this, **stelevator** takes two additional parameters not typically seen in stellar models:  \n"
+    " - $f_K$, the braking law strength  \n"
+    r" - $\textrm{Ro}_\textsf{crit}$, the critical Rossby number "    
+)
+
+st.markdown(
+    "Please see the [paper](https://ui.adsabs.harvard.edu/abs/2024ApJ...962..138S/abstract) for details about "
+    "the braking law."
+)
+
+st.markdown("#### Model limitations")
+
+st.markdown(
+    "The neural networks were trained on models with a limited range of input parameters, "
+    "so care should be taken when using **stelevator** to ensure that inputs remain within "
+    "the training bounds. See the [paper](https://ui.adsabs.harvard.edu/abs/2024ApJ...962..138S/abstract) "
+    "for full details on the model training and performance. Parameter boundaries are listed in Table 1."
+)
+
+st.markdown("⚠ **We strongly caution that extrapolation beyond the training bounds may lead to unphysical results.**")
+
 
 
 st.markdown("---")
@@ -100,8 +141,10 @@ if mode == "Population":
         format="%d",
         help="More stars give smoother distributions but take longer to compute.",
     )
-    fk = st.number_input(r"$f_K$", value=7.5)
-    rocrit = st.number_input(r"$\textrm{Ro}_\textsf{crit}$", value=1.6)
+    fk = st.number_input(r"$f_K$: braking law strength", value=7.5, min_value=4.0, max_value=11.0, step=0.1)
+    rocrit = st.number_input(r"$\textrm{Ro}_\textsf{crit}$: critical Rossby number", value=1.6, min_value=1.0, max_value=4.5, step=0.1)
+    st.markdown("ℹ Note: if you do not want to model the effects of weakened magnetic braking (WMB), "
+                r"set $\textrm{Ro}_\textsf{crit}$ to its maximum value of 4.5.")
     include_uncertainties = st.checkbox("Return estimated uncertainties in output table", value=False)
 
     st.markdown("### Parameter bounds & sampling")
@@ -326,10 +369,13 @@ else:
         step=0.01,
     )
 
+    fk = st.number_input(r"$f_k$: braking law strength", value=7.6, min_value=4.0, max_value=11.0, step=0.1)
+    rocrit = st.number_input(r"$\textrm{Ro}_\textsf{crit}$: critical Rossby number", value=1.6, min_value=1.0, max_value=4.5, step=0.1)
+    st.markdown("ℹ Note: if you do not want to model the effects of weakened magnetic braking (WMB), "
+                r"set $\textrm{Ro}_\textsf{crit}$ to its maximum value of 4.5.")
+    
     M = st.number_input(r"Mass [M$_☉$]", value=1.0, step=0.01, min_value=0.8, max_value=1.2)
     feh = st.number_input("[Fe/H]", value=0.0, step=0.01, min_value=-0.3, max_value=0.3)
-    fk = st.number_input(r"$f_k$", value=7.6, min_value=4.0, max_value=11.0, step=0.1)
-    rocrit = st.number_input(r"$\textrm{Ro}_\textsf{crit}$", value=1.6, min_value=1.0, max_value=4.5, step=0.1)
     alpha = st.number_input(r"α$_\textsf{MLT}$", value=1.6, step=0.01, min_value=1.4, max_value=2.0)
 
     if grid == "MESA":
