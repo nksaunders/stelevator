@@ -36,7 +36,7 @@ st.markdown(
 st.markdown("***↑ Going up?***")
 
 st.markdown(
-    "Grid-based stellar evolution emulator for MESA / YREC models. "
+    "Neural network stellar evolution emulator for MESA / YREC models. "
     "Use the sidebar to choose a model grid and mode."
 )
 
@@ -131,8 +131,8 @@ def check_truncnorm(name, mu, sigma, low, high, units=""):
 # Sidebar: global configuration
 # ---------------------------------------------------------------------
 st.sidebar.header("Configuration")
-grid = st.sidebar.radio("Model grid", ["MESA", "YREC"])
 mode = st.sidebar.radio("Mode", ["Population", "Track"])
+grid = st.sidebar.radio("Model grid", ["MESA", "YREC"])
 
 
 # ---------------------------------------------------------------------
