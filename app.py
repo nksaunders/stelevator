@@ -1,283 +1,246 @@
-# app.py
-import numpy as np
-import matplotlib
-matplotlib.use("Agg")  # non-interactive backend, safe for Streamlit
+from pathlib import Path
+
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 import streamlit as st
 
-from emulator import (
-    create_MESA_population,
-    create_YREC_population,
-    create_MESA_track,
-    create_YREC_track,
-)
+import emulator as em
 
-st.set_page_config(page_title="Stelevator", layout="wide")
+st.set_page_config(page_title="stelevator", layout="wide")
 
+# ---------------------------------------------------------------------
+# Custom title styling (you already had a bold/underline variant)
+# ---------------------------------------------------------------------
 st.markdown(
     """
     <style>
     .stelevator-title {
         font-size: 2.5rem;
-        font-weight: 400;        /* normal weight for the whole title */
+        font-weight: 400;
         margin: 0 0 1rem 0;
     }
-    .stelevator-title b {
-        font-weight: 700;        /* extra bold only for the marked bits */
+    .stelevator-title b, .stelevator-title u {
+        font-weight: 700;
+        text-decoration: underline;
     }
     </style>
     <div class="stelevator-title">
-      <u><b>stelevator</b></u>: <u>stel</u>lar <u>ev</u>olution emul<u>ator</u>
+      <b>stel</b>ev<b>ator</b>: <b>stel</b>lar <b>ev</b>olution emul<b>ator</b>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
+st.markdown(
+    "Grid-based stellar evolution emulator for MESA / YREC models. "
+    "Use the sidebar to choose a model grid and mode."
+)
+
+ROOT = Path(__file__).resolve().parent
+
+
+# ---------------------------------------------------------------------
+# Helper: per-parameter sampling radio
+# ---------------------------------------------------------------------
+def sampling_radio(label: str, key: str) -> str:
+    choice = st.radio(
+        label,
+        ["Uniform", "Truncated normal"],
+        horizontal=True,
+        key=key,
+    )
+    return "truncnorm" if choice == "Truncated normal" else "uniform"
+
+
+# ---------------------------------------------------------------------
+# Helper: validation for truncated normal parameters
+# ---------------------------------------------------------------------
+def check_truncnorm(name, mu, sigma, low, high, units=""):
+    msgs = []
+    if not (low <= mu <= high):
+        msgs.append(
+            f"{name} mean{units} must lie within [{low:.3g}, {high:.3g}] "
+            f"(currently {mu:.3g})."
+        )
+    if sigma < 0:
+        msgs.append(f"{name} sigma{units} must be non-negative.")
+    elif sigma > (high - low):
+        msgs.append(
+            f"{name} sigma{units} should be ≤ range width ({high - low:.3g}); "
+            f"currently {sigma:.3g}."
+        )
+    return msgs
+
+
+# ---------------------------------------------------------------------
+# Sidebar: global configuration
+# ---------------------------------------------------------------------
 st.sidebar.header("Configuration")
+grid = st.sidebar.radio("Model grid", ["MESA", "YREC"])
+mode = st.sidebar.radio("Mode", ["Population", "Track"])
 
-grid = st.sidebar.selectbox("Stellar grid", ["MESA", "YREC"])
-mode = st.sidebar.selectbox("Mode", ["Population", "Track"])
 
 # ---------------------------------------------------------------------
-# Figure helpers that mimic emulator.py's plot_star / plot_sample
+# Population mode
 # ---------------------------------------------------------------------
-
-def make_star_figure(df):
-    """
-    Match emulator.plot_star: 3 panels, Age–P, Teff–logP, Teff–logL with
-    benchmark ages highlighted.
-    """
-    benchmarks = [1e-3, 1e-2, 1e-1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-
-    dims = (4, 10)
-    plt.figure(dpi=120)
-    ax = plt.subplot2grid(dims, (0, 0), colspan=4, rowspan=2)
-
-    ax.plot(df["Age"], df["P"], c="cornflowerblue")
-    ax.set_xlabel("Age [Gyr]")
-    ax.set_ylabel("P [days]")
-
-    ax = plt.subplot2grid(dims, (2, 0), colspan=4, rowspan=2)
-
-    ax.plot(df["Teff"], np.log10(df["P"]), c="k", lw=1)
-    for b in benchmarks:
-        if (b >= df["Age"].iloc[0]) and (b <= df["Age"].iloc[-1]):
-            idx = np.argmin(np.abs(b - df["Age"]))
-            ax.scatter(
-                df["Teff"][idx],
-                np.log10(df["P"][idx]),
-                c=df["Age"][idx],
-                zorder=1000,
-                vmin=df["Age"].iloc[0],
-                vmax=df["Age"].iloc[-1],
-                s=75,
-            )
-    ax.set_xlim(np.max(df["Teff"]) + 100, np.min(df["Teff"]) - 100)
-    ax.set_xlabel(r"T$_{\rm eff}$ [K]")
-    ax.set_ylabel("log(P) [days]")
-
-    ax = plt.subplot2grid(dims, (0, 4), colspan=5, rowspan=4)
-    ax.plot(df["Teff"], np.log10(df["L"]), c="k", lw=1)
-    for b in benchmarks:
-        if (b >= df["Age"].iloc[0]) and (b <= df["Age"].iloc[-1]):
-            idx = np.argmin(np.abs(b - df["Age"]))
-            ax.scatter(
-                df["Teff"][idx],
-                np.log10(df["L"][idx]),
-                c=df["Age"][idx],
-                zorder=1000,
-                vmin=df["Age"].iloc[0],
-                vmax=df["Age"].iloc[-1],
-                s=75,
-                label=f"{b} Gyr",
-            )
-    ax.legend(bbox_to_anchor=(1.0, 1.0), loc="upper left", fontsize=10)
-    ax.set_xlim(np.max(df["Teff"]) + 100, np.min(df["Teff"]) - 100)
-    ax.set_ylim(
-        np.min(np.log10(df["L"])) - 0.025,
-        np.max(np.log10(df["L"])) + 0.025,
-    )
-    ax.set_xlabel(r"T$_{\rm eff}$ [K]")
-    ax.set_ylabel(r"log(L) [L$_\odot$]")
-
-    fig = plt.gcf()
-    fig.patch.set_facecolor("white")
-    fig.set_size_inches([d + 5 for d in dims[::-1]])
-    fig.tight_layout()
-    return fig
-
-
-def make_sample_figure(df, M_bounds):
-    """
-    Match emulator.plot_sample: 3 panels with points colored by mass.
-    """
-    age_sample = np.array(df["Age"])
-    M_sample = np.array(df["M"])
-    Prots = np.array(df["P"])
-    Teffs = np.array(df["Teff"])
-    Ls = np.array(df["L"])
-
-    dims = (4, 10)
-    plt.figure(dpi=120)
-    ax = plt.subplot2grid(dims, (0, 0), colspan=4, rowspan=2)
-
-    ax.scatter(
-        age_sample,
-        Prots,
-        edgecolor="None",
-        c=M_sample,
-        alpha=0.5,
-        s=10,
-        vmin=M_bounds[2],
-        vmax=M_bounds[3],
-    )
-    ax.set_ylim(0, 50)
-    ax.set_xlabel("Age [Gyr]")
-    ax.set_ylabel("P [days]")
-
-    ax = plt.subplot2grid(dims, (2, 0), colspan=4, rowspan=2)
-
-    ax.scatter(
-        Teffs,
-        np.log10(Prots),
-        edgecolor="None",
-        c=M_sample,
-        alpha=0.5,
-        s=10,
-        vmin=M_bounds[2],
-        vmax=M_bounds[3],
-    )
-    ax.set_xlim(7000, 4000)
-    ax.set_ylim(0.2, 2)
-    ax.set_xlabel(r"T$_{\rm eff}$ [K]")
-    ax.set_ylabel("log(P) [days]")
-
-    ax = plt.subplot2grid(dims, (0, 4), colspan=5, rowspan=4)
-
-    ax.scatter(
-        Teffs,
-        np.log10(Ls),
-        edgecolor="None",
-        c=M_sample,
-        alpha=0.5,
-        s=10,
-        vmin=M_bounds[2],
-        vmax=M_bounds[3],
-    )
-    ax.set_xlim(7000, 4000)
-    ax.set_ylim(-1, 2)
-    ax.set_xlabel(r"T$_{\rm eff}$ [K]")
-    ax.set_ylabel(r"log(L) [L$_\odot$]")
-    cax = ax.scatter(1, 1, c=1, vmin=M_bounds[2], vmax=M_bounds[3])
-    plt.colorbar(cax, ax=ax, label=r"M [M$_\odot$]")
-
-    fig = plt.gcf()
-    fig.patch.set_facecolor("white")
-    fig.set_size_inches([d + 5 for d in dims[::-1]])
-    fig.tight_layout()
-    return fig
-
-# ---------------------------------------------------------------------
-# UI controls
-# ---------------------------------------------------------------------
-
 if mode == "Population":
     st.subheader(f"{grid} population")
 
     nstars = st.number_input(
-        "Number of stars", min_value=1, max_value=200_000, value=10_000, step=1
+        "Number of stars",
+        min_value=100,
+        max_value=500_000,
+        value=10_000,
+        step=100,
+        format="%d",
+        help="More stars give smoother distributions but take longer to compute.",
     )
-    fk = st.number_input("fk", value=7.5)
-    rocrit = st.number_input("rocrit", value=1.6)
-    include_uncertainties = st.checkbox("Include uncertainties", value=False)
+    fk = st.number_input(r"$f_K$", value=7.5)
+    rocrit = st.number_input(r"$\textrm{Ro}_\textsf{crit}$", value=1.6)
+    include_uncertainties = st.checkbox("Return estimated uncertainties in output table", value=False)
 
-    st.markdown("### Parameter bounds")
+    st.markdown("### Parameter bounds & sampling")
 
-    cols = st.columns(4)
-    with cols[0]:
-        age_mu = st.number_input("Age mean [Gyr]", value=5.0)
-    with cols[1]:
-        age_sigma = st.number_input("Age sigma [Gyr]", value=5.0)
-    with cols[2]:
-        age_min = st.number_input("Age min [Gyr]", value=0.0)
-    with cols[3]:
-        age_max = st.number_input("Age max [Gyr]", value=10.0)
-
-    cols = st.columns(4)
-    with cols[0]:
-        M_mu = st.number_input("Mass mean [M☉]", value=1.0)
-    with cols[1]:
-        M_sigma = st.number_input("Mass sigma [M☉]", value=0.1)
-    with cols[2]:
-        M_min = st.number_input("Mass min [M☉]", value=0.8)
-    with cols[3]:
-        M_max = st.number_input("Mass max [M☉]", value=1.2)
-
-    cols = st.columns(4)
-    with cols[0]:
-        feh_mu = st.number_input("[Fe/H] mean", value=0.0)
-    with cols[1]:
-        feh_sigma = st.number_input("[Fe/H] sigma", value=0.2)
-    with cols[2]:
-        feh_min = st.number_input("[Fe/H] min", value=-0.3)
-    with cols[3]:
-        feh_max = st.number_input("[Fe/H] max", value=0.3)
-
-    if grid == "MESA":
-        cols = st.columns(4)
+    # --- Age [Gyr] ---
+    sampling_age = sampling_radio("Age sampling", key="sampling_age")
+    age_min, age_max = st.slider(
+        "Age range [Gyr]",
+        min_value=0.0,
+        max_value=12.0,
+        value=(0.0, 8.0),
+        step=0.1,
+    )
+    if sampling_age == "truncnorm":
+        cols = st.columns(2)
         with cols[0]:
-            Y_mu = st.number_input(r"Y$_{\textsf{init}}$ mean", value=0.26)
+            age_mu = st.number_input("Age mean [Gyr]", value=5.0, step=0.1)
         with cols[1]:
-            Y_sigma = st.number_input(r"Y$_{\textsf{init}}$ sigma", value=0.2)
-        with cols[2]:
-            Y_min = st.number_input(r"Y$_{\textsf{init}}$ min", value=0.22)
-        with cols[3]:
-            Y_max = st.number_input(r"Y$_{\textsf{init}}$ max", value=0.28)
+            age_sigma = st.number_input("Age sigma [Gyr]", value=5.0, min_value=0.0, step=0.1)
+    else:
+        age_mu, age_sigma = None, None
 
-    cols = st.columns(4)
-    with cols[0]:
-        alpha_mu = st.number_input(r"α$_{\textsf{MLT}}$ mean", value=1.6)
-    with cols[1]:
-        alpha_sigma = st.number_input(r"α$_{\textsf{MLT}}$ sigma", value=0.2)
-    with cols[2]:
-        alpha_min = st.number_input(r"α$_{\textsf{MLT}}$ min", value=1.4)
-    with cols[3]:
-        alpha_max = st.number_input(r"α$_{\textsf{MLT}}$ max", value=2.0)
-
-else:
-    st.subheader(f"{grid} track")
-
-    npoints = st.number_input(
-        "Number of points", min_value=10, max_value=50_000, value=10_000, step=100
+    # --- Mass [M_sun] ---
+    sampling_M = sampling_radio("Mass sampling", key="sampling_M")
+    M_min, M_max = st.slider(
+        r"Mass range [M$_☉$]",
+        min_value=0.8,
+        max_value=1.2,
+        value=(0.8, 1.2),
+        step=0.01,
     )
-    min_age = st.number_input("Min age [Gyr]", value=0.01)
-    max_age = st.number_input("Max age [Gyr]", value=10.0)
+    if sampling_M == "truncnorm":
+        cols = st.columns(2)
+        with cols[0]:
+            M_mu = st.number_input(r"Mass mean [M$_☉$]", value=1.0, step=0.01)
+        with cols[1]:
+            M_sigma = st.number_input(r"Mass sigma [M$_☉$]", value=0.1, min_value=0.0, step=0.01)
+    else:
+        M_mu, M_sigma = None, None
 
-    M = st.number_input("Mass [M☉]", value=1.0)
-    feh = st.number_input("[Fe/H]", value=0.0)
+    # --- [Fe/H] ---
+    sampling_feh = sampling_radio("[Fe/H] sampling", key="sampling_feh")
+    feh_min, feh_max = st.slider(
+        "[Fe/H] range",
+        min_value=-0.3,
+        max_value=0.3,
+        value=(-0.3, 0.3),
+        step=0.05,
+    )
+    if sampling_feh == "truncnorm":
+        cols = st.columns(2)
+        with cols[0]:
+            feh_mu = st.number_input("[Fe/H] mean", value=0.0, step=0.01)
+        with cols[1]:
+            feh_sigma = st.number_input("[Fe/H] sigma", value=0.2, min_value=0.0, step=0.01)
+    else:
+        feh_mu, feh_sigma = None, None
+
+    # --- α_MLT ---
+    sampling_alpha = sampling_radio(r"α$_\textsf{MLT}$ sampling", key="sampling_alpha")
+    alpha_min, alpha_max = st.slider(
+        r"α$_\textsf{MLT}$ range",
+        min_value=1.4,
+        max_value=2.0,
+        value=(1.4, 2.0),
+        step=0.05,
+    )
+    if sampling_alpha == "truncnorm":
+        cols = st.columns(2)
+        with cols[0]:
+            alpha_mu = st.number_input(r"α$_\textsf{MLT}$ mean", value=1.6, step=0.01)
+        with cols[1]:
+            alpha_sigma = st.number_input(
+                r"α$_\textsf{MLT}$ sigma", value=0.2, min_value=0.0, step=0.01
+            )
+    else:
+        alpha_mu, alpha_sigma = None, None
+
+    # --- Y_ini (MESA only) ---
     if grid == "MESA":
-        Y = st.number_input("Y_ini", value=0.26)
-    alpha = st.number_input("α_MLT", value=1.6)
-    fk = st.number_input("fk", value=7.6)
-    rocrit = st.number_input("rocrit", value=1.6)
+        sampling_Y = sampling_radio(r"Y$_\textsf{init}$ sampling", key="sampling_Y")
+        Y_min, Y_max = st.slider(
+            r"Y$_\textsf{init}$ range",
+            min_value=0.22,
+            max_value=0.28,
+            value=(0.22, 0.28),
+            step=0.005,
+        )
+        if sampling_Y == "truncnorm":
+            cols = st.columns(2)
+            with cols[0]:
+                Y_mu = st.number_input(r"Y$_\textsf{init}$ mean", value=0.26, step=0.005)
+            with cols[1]:
+                Y_sigma = st.number_input(
+                r"Y$_\textsf{init}$ sigma", value=0.02, min_value=0.0, step=0.005
+            )
+        else:
+            Y_mu, Y_sigma = None, None
+    else:
+        Y_min, Y_max, Y_mu, Y_sigma, sampling_Y = None, None, None, None, None
 
-# ---------------------------------------------------------------------
-# Run button
-# ---------------------------------------------------------------------
+    # Build bounds arrays
+    age_bounds = [age_mu, age_sigma, age_min, age_max]
+    M_bounds = [M_mu, M_sigma, M_min, M_max]
+    feh_bounds = [feh_mu, feh_sigma, feh_min, feh_max]
+    if grid == "MESA":
+        Y_bounds = [Y_mu, Y_sigma, Y_min, Y_max]
+    alpha_bounds = [alpha_mu, alpha_sigma, alpha_min, alpha_max]
 
-run = st.button("Run emulator")
+    # Validation: only for parameters using truncated normal
+    invalid_msgs: list[str] = []
 
-if run:
-    with st.spinner("Running emulator..."):
-        if mode == "Population":
-            age_bounds = [age_mu, age_sigma, age_min, age_max]
-            M_bounds = [M_mu, M_sigma, M_min, M_max]
-            feh_bounds = [feh_mu, feh_sigma, feh_min, feh_max]
-            alpha_bounds = [alpha_mu, alpha_sigma, alpha_min, alpha_max]
+    if sampling_age == "truncnorm":
+        invalid_msgs += check_truncnorm(
+            "Age", age_mu, age_sigma, age_min, age_max, " [Gyr]"
+        )
+    if sampling_M == "truncnorm":
+        invalid_msgs += check_truncnorm(
+            "Mass", M_mu, M_sigma, M_min, M_max, " [M☉]"
+        )
+    if sampling_feh == "truncnorm":
+        invalid_msgs += check_truncnorm(
+            "[Fe/H]", feh_mu, feh_sigma, feh_min, feh_max
+        )
+    if grid == "MESA" and sampling_Y == "truncnorm":
+        invalid_msgs += check_truncnorm(
+            "Y_ini", Y_mu, Y_sigma, Y_min, Y_max
+        )
+    if sampling_alpha == "truncnorm":
+        invalid_msgs += check_truncnorm(
+            "α_MLT", alpha_mu, alpha_sigma, alpha_min, alpha_max
+        )
 
+    if invalid_msgs:
+        st.error("Some parameter settings are invalid:\n\n- " + "\n- ".join(invalid_msgs))
+
+    params_valid = len(invalid_msgs) == 0
+    run = st.button("Run emulator", disabled=not params_valid)
+
+    if run and params_valid:
+        try:
             if grid == "MESA":
-                Y_bounds = [Y_mu, Y_sigma, Y_min, Y_max]
-                df = create_MESA_population(
+                df = em.create_MESA_population(
                     nstars=nstars,
                     fk=fk,
                     rocrit=rocrit,
@@ -289,9 +252,14 @@ if run:
                     feh_bounds=feh_bounds,
                     Y_bounds=Y_bounds,
                     alpha_bounds=alpha_bounds,
+                    sampling_age=sampling_age,
+                    sampling_M=sampling_M,
+                    sampling_feh=sampling_feh,
+                    sampling_Y=sampling_Y,
+                    sampling_alpha=sampling_alpha,
                 )
             else:
-                df = create_YREC_population(
+                df = em.create_YREC_population(
                     nstars=nstars,
                     fk=fk,
                     rocrit=rocrit,
@@ -302,13 +270,78 @@ if run:
                     M_bounds=M_bounds,
                     feh_bounds=feh_bounds,
                     alpha_bounds=alpha_bounds,
+                    sampling_age=sampling_age,
+                    sampling_M=sampling_M,
+                    sampling_feh=sampling_feh,
+                    sampling_alpha=sampling_alpha,
                 )
-        else:
+
+            st.success("Population generated.")
+
+            # Plot in the original style
+            fig = em.plot_sample(df, M_bounds=M_bounds, show=False)
+            st.pyplot(fig)
+
+            # --- Table + download ---
+            st.subheader("First few rows of output")
+            st.dataframe(df.head())
+
+            # Download CSV
+            csv = df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "Download population CSV",
+                csv,
+                file_name=f"{grid}_population.csv",
+                mime="text/csv",
+            )
+
+        except Exception as e:
+            st.error(f"Error running emulator: {e}")
+
+
+# ---------------------------------------------------------------------
+# Track mode
+# ---------------------------------------------------------------------
+else:
+    st.subheader(f"{grid} evolutionary track")
+
+    npoints = st.number_input(
+        "Number of points along track",
+        min_value=100,
+        max_value=100_000,
+        value=10_000,
+        step=100,
+        format="%d",
+    )
+
+    age_min, age_max = st.slider(
+        "Age range [Gyr]",
+        min_value=0.0,
+        max_value=14.0,
+        value=(0.01, 10.0),
+        step=0.01,
+    )
+
+    M = st.number_input(r"Mass [M$_☉$]", value=1.0, step=0.01, min_value=0.8, max_value=1.2)
+    feh = st.number_input("[Fe/H]", value=0.0, step=0.01, min_value=-0.3, max_value=0.3)
+    fk = st.number_input(r"$f_k$", value=7.6, min_value=4.0, max_value=11.0, step=0.1)
+    rocrit = st.number_input(r"$\textrm{Ro}_\textsf{crit}$", value=1.6, min_value=1.0, max_value=4.5, step=0.1)
+    alpha = st.number_input(r"α$_\textsf{MLT}$", value=1.6, step=0.01, min_value=1.4, max_value=2.0)
+
+    if grid == "MESA":
+        Y = st.number_input(r"Y$_\textsf{init}$", value=0.26, step=0.005, min_value=0.22, max_value=0.28)
+    else:
+        Y = None
+
+    run = st.button("Run emulator")
+
+    if run:
+        try:
             if grid == "MESA":
-                df = create_MESA_track(
+                df = em.create_MESA_track(
                     npoints=npoints,
-                    min_age=min_age,
-                    max_age=max_age,
+                    min_age=age_min,
+                    max_age=age_max,
                     plot=False,
                     save_dataframe=False,
                     M=M,
@@ -319,10 +352,10 @@ if run:
                     rocrit=rocrit,
                 )
             else:
-                df = create_YREC_track(
+                df = em.create_YREC_track(
                     npoints=npoints,
-                    min_age=min_age,
-                    max_age=max_age,
+                    min_age=age_min,
+                    max_age=age_max,
                     plot=False,
                     save_dataframe=False,
                     M=M,
@@ -332,31 +365,22 @@ if run:
                     rocrit=rocrit,
                 )
 
-    st.success("Done!")
+            st.success("Track generated.")
 
-    # --- Plots matching emulator.py style ---
-    st.subheader("Plots")
+            fig = em.plot_star(df, show=False)
+            st.pyplot(fig)
 
-    if mode == "Population":
-        fig = make_sample_figure(df, M_bounds)
-    else:
-        fig = make_star_figure(df)
+            # --- Table + download ---
+            st.subheader("First few rows of output")
+            st.dataframe(df.head())
 
-    st.pyplot(fig)
-    plt.close(fig)
+            csv = df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "Download track CSV",
+                csv,
+                file_name=f"{grid}_track.csv",
+                mime="text/csv",
+            )
 
-    # --- Table + download ---
-    st.subheader("First few rows of output")
-    st.dataframe(df.head())
-
-    st.subheader("Download CSV")
-    csv_bytes = df.to_csv(index=False).encode("utf-8")
-    filename = f"{grid}_{mode.lower()}_output.csv"
-    st.download_button(
-        label="Download CSV",
-        data=csv_bytes,
-        file_name=filename,
-        mime="text/csv",
-    )
-else:
-    st.info("Set parameters in the sidebar and click **Run emulator**.")
+        except Exception as e:
+            st.error(f"Error running emulator: {e}")
