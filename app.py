@@ -7,10 +7,12 @@ import streamlit as st
 
 import emulator as em
 
+ROOT = Path(__file__).resolve().parent
+
 st.set_page_config(page_title="stelevator", layout="wide")
 
 # ---------------------------------------------------------------------
-# Custom title styling (you already had a bold/underline variant)
+# Custom title styling
 # ---------------------------------------------------------------------
 st.markdown(
     """
@@ -37,8 +39,10 @@ st.markdown(
     "Use the sidebar to choose a model grid and mode."
 )
 
-ROOT = Path(__file__).resolve().parent
+# st.subheader("Important caveats")
 
+
+st.markdown("---")
 
 # ---------------------------------------------------------------------
 # Helper: per-parameter sampling radio
