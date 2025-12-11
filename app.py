@@ -378,8 +378,10 @@ else:
         step=0.01,
     )
 
-    fk = st.number_input(r"$f_k$: braking law strength", value=7.6, min_value=4.0, max_value=11.0, step=0.1)
-    rocrit = st.number_input(r"$\textrm{Ro}_\textsf{crit}$: critical Rossby number", value=1.6, min_value=1.0, max_value=4.5, step=0.1)
+    fk = st.number_input(r"$f_k$: braking law strength", 
+                         value=7.6, min_value=4.0, max_value=11.0, step=0.1)
+    rocrit = st.number_input(r"$\textrm{Ro}_\textsf{crit}$: critical Rossby number", 
+                             value=1.6, min_value=1.0, max_value=4.5, step=0.1)
     st.markdown("ℹ Note: if you do not want to model the effects of weakened magnetic braking (WMB), "
                 r"set $\textrm{Ro}_\textsf{crit}$ to its maximum value of 4.5.")
     

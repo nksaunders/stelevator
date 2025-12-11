@@ -659,7 +659,7 @@ def create_YREC_track(
 # ---------------------------------------------------------------------
 def plot_star(df: pd.DataFrame, show: bool = True):
     """
-    Plot a single-star evolutionary track in the original style.
+    Plot the emulated single-star evolutionary track.
 
     Returns
     -------
@@ -731,7 +731,7 @@ def plot_star(df: pd.DataFrame, show: bool = True):
 
 def plot_sample(df: pd.DataFrame, M_bounds=[1.0, 0.5, 0.8, 1.2], show: bool = True):
     """
-    Plot a population sample in the original style.
+    Plot the emulated stellar population.
 
     Returns
     -------
